@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 添加独立的 ETF 轮动盘后 GitHub Actions 工作流，支持交易日过滤、运行摘要和可选机器人推送。
 - [修复] 选股、告警与个股分析报告统一使用同一 Wilder RSI（`src/utils/rsi.py`，基于 `fin-primitives`，以前 period 个涨跌幅的简单均值起算，与 TA-Lib 一致）：选股不再使用简单滚动均值，告警与报告不再以首行零涨跌幅起算 ewm，短历史下三处的超买/超卖判断不再出现分歧。预热期与无波动时仍为中性值 50；RSI 告警不再用预热占位值判断穿越，最少历史改为 period+2 根。
 - [文档] 将 AlphaSift 与 AlphaEvo 的项目入口前移至 README 产品预览之后、功能特性之前，以 `[!TIP]` 提示框展示，同步简体、英文与繁体版本。
 

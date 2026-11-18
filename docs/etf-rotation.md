@@ -43,6 +43,16 @@ python main.py --etf-rotation --no-notify  # 只生成本地报告
 
 建议用 cron 或 CI 在每周最后一个交易日收盘后运行一次。本命令不接入 `--schedule`。
 
+## GitHub Actions 盘后运行
+
+在 Fork 的 Actions 页选择「ETF 轮动盘后报告」，点击 **Run workflow**。第一次保持通知选项关闭，完成后在运行的 **Summary** 查看报告。此工作流使用标准 Linux runner，只运行 ETF 轮动命令。
+
+- 周一至周五北京时间 18:30 触发，按 A 股交易日历跳过休市日。工作流可能排队，实际时间以运行记录为准。
+- 工作流预设风险池 `510300,159915,588000,512890,518880`，防守资产 `511360`，20 个交易日动量、每周调仓、最多一只。沿用正动量过滤、默认换仓缓冲及下一交易日收盘的回测成交口径。周内报告的目标持仓仅供观察。
+- 手机推送可选飞书或企业微信。在 Fork 的 **Settings → Secrets and variables → Actions** 添加 `FEISHU_WEBHOOK_URL` 或 `WECHAT_WEBHOOK_URL`。飞书签名校验另设 Secret `FEISHU_WEBHOOK_SECRET`，关键词校验可设 Variable `FEISHU_WEBHOOK_KEYWORD`。再次手动运行并勾选通知，确认群内实际收到报告。定时运行在配置机器人后会自动推送。
+- 行情优先沿用现有免费数据源，若已有 TickPlus Key，可选配 Secret `TICKPLUS_API_KEY`。出现取数或复权告警时，查看报告的数据告警和运行日志。
+- 公开 Fork 的运行摘要和日志可公开查看。Webhook 和签名密钥通过 Secrets 配置。暂停时可在 Actions 页禁用该工作流。
+
 ## 配置
 
 以下配置都是可选的，不配置时使用默认值。

@@ -1,0 +1,111 @@
+name: ETF 轮动盘后报告
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5' # 北京时间周一至周五 18:30
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: '向已配置的飞书或企业微信机器人推送本次报告'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: etf-rotation
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ETF_ROTATION_POOL: '510300,159915,588000,512890,518880'
+      ETF_ROTATION_SAFE_ASSET: '511360'
+      ETF_ROTATION_LOOKBACK_DAYS: '20'
+      ETF_ROTATION_REBALANCE: weekly
+      ETF_ROTATION_TOP_N: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt
+
+      - name: 检查交易日
+        id: calendar
+        if: github.event_name == 'schedule'
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from src.core.trading_calendar import (
+              get_effective_trading_date,
+              get_market_now,
+              get_trading_dates,
+          )
+
+          now = get_market_now("cn")
+          today = now.date()
+          sessions = get_trading_dates("cn", today, today)
+          if sessions is None:
+              raise SystemExit("A 股交易日历不可用")
+          skip = sessions.empty or get_effective_trading_date("cn", now) != today
+          if skip:
+              print(f"{today} 不是已收盘的 A 股交易日，跳过定时报告。")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"skip={str(skip).lower()}", file=output)
+          PY
+
+      - name: 生成 ETF 轮动报告
+        id: rotation
+        if: steps.calendar.outputs.skip != 'true'
+        env:
+          TICKPLUS_API_KEY: ${{ secrets.TICKPLUS_API_KEY }}
+        run: |
+          python main.py --etf-rotation --no-notify
+          shopt -s nullglob
+          reports=(reports/etf_rotation_*.md)
+          if [[ "${#reports[@]}" -ne 1 || ! -s "${reports[0]}" ]]; then
+            echo "::error::未生成可用的 ETF 轮动报告"
+            exit 1
+          fi
+          cat "${reports[0]}" >> "$GITHUB_STEP_SUMMARY"
+          printf 'path=%s\n' "${reports[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: 推送报告
+        if: steps.rotation.outputs.path != '' && (github.event_name == 'schedule' || inputs.notify)
+        env:
+          REPORT_PATH: ${{ steps.rotation.outputs.path }}
+          MANUAL_PUSH: ${{ inputs.notify }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_WEBHOOK_KEYWORD: ${{ vars.FEISHU_WEBHOOK_KEYWORD }}
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+        run: |
+          python - <<'PY'
+          import logging
+          import os
+          from pathlib import Path
+          from src.notification import NotificationService
+
+          logging.basicConfig(level=logging.INFO)
+          notifier = NotificationService()
+          if not notifier.is_available():
+              if os.environ["MANUAL_PUSH"] == "true":
+                  raise SystemExit("请先配置 FEISHU_WEBHOOK_URL 或 WECHAT_WEBHOOK_URL")
+              print("未配置通知机器人，本次报告可在运行摘要查看。")
+          elif not notifier.send(
+              Path(os.environ["REPORT_PATH"]).read_text(encoding="utf-8"),
+              route_type="report",
+          ):
+              raise SystemExit("机器人推送失败，请检查通知日志和机器人配置")
+          PY
